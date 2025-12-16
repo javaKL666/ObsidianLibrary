@@ -255,14 +255,18 @@ local Templates = {
         Resizable = true,
         SearchbarSize = UDim2.fromScale(1, 1),
         CornerRadius = 4,
-        Compact = false,
-        DisableCompactChanges = false,
         NotifySide = "Right",
         ShowCustomCursor = true,
         Font = Enum.Font.Code,
         ToggleKeybind = Enum.KeyCode.RightControl,
         MobileButtonsSide = "Left",
         UnlockMouseWhileOpen = true,
+        Compact = false,
+        EnableSidebarResize = false,
+        SidebarMinWidth = 180,
+        SidebarCompactWidth = 54,
+        SidebarCollapseThreshold = 0.5,
+        SidebarHighlightCallback = nil,
     },
     Toggle = {
         Text = "Toggle",
@@ -336,6 +340,19 @@ local Templates = {
         RectSize = Vector2.zero,
         ScaleType = Enum.ScaleType.Fit,
         Height = 200,
+        Visible = true,
+    },
+    Video = {
+        Video = "",
+        Looped = false,
+        Playing = false,
+        Volume = 1,
+        Height = 200,
+        Visible = true,
+    },
+    UIPassthrough = {
+        Instance = nil,
+        Height = 24,
         Visible = true,
     },
 
@@ -489,6 +506,10 @@ local function GetTeams()
     end)
 
     return TeamList
+end
+local function GetLighterColor(Color)
+    local H, S, V = Color:ToHSV()
+    return Color3.fromHSV(H, math.max(0, S - 0.1), math.min(1, V + 0.1))
 end
 
 function Library:UpdateKeybindFrame()
@@ -1852,6 +1873,7 @@ local CheckIcon = Library:GetIcon("check")
 local ArrowIcon = Library:GetIcon("chevron-up")
 local ResizeIcon = Library:GetIcon("move-diagonal-2")
 local KeyIcon = Library:GetIcon("key")
+local MoveIcon = Library:GetIcon("move")
 
 function Library:SetIconModule(module: IconModule)
     FetchIcons = true
@@ -1862,6 +1884,7 @@ function Library:SetIconModule(module: IconModule)
     ArrowIcon = Library:GetIcon("chevron-up")
     ResizeIcon = Library:GetIcon("move-diagonal-2")
     KeyIcon = Library:GetIcon("key")
+    MoveIcon = Library:GetIcon("move")
 end
 
 local BaseAddons = {}
@@ -1876,7 +1899,6 @@ do
 
         local KeyPicker = {
             Text = Info.Text,
-
             Value = Info.Default, -- Key
             Modifiers = Info.DefaultModifiers, -- Modifiers
             DisplayValue = Info.Default, -- Picker Text
@@ -1899,6 +1921,11 @@ do
             KeyPicker.SyncToggleState = false
             Info.Modes = { "Press" }
             Info.Mode = "Press"
+        end
+
+        if KeyPicker.SyncToggleState then
+            Info.Modes = { "Toggle" }
+            Info.Mode = "Toggle"
         end
 
         local Picking = false
@@ -1946,13 +1973,24 @@ do
         }
 
         local IsModifierInput = function(Input)
-            return false
+            return Input.UserInputType == Enum.UserInputType.Keyboard and ModifiersInput[Input.KeyCode] ~= nil
         end
 
         local GetActiveModifiers = function()
-          
+            local ActiveModifiers = {}
 
-            return {}
+            for Name, Input in Modifiers do
+                if table.find(ActiveModifiers, Name) then
+                    continue
+                end
+                if not UserInputService:IsKeyDown(Input) then
+                    continue
+                end
+
+                table.insert(ActiveModifiers, Name)
+            end
+
+            return ActiveModifiers
         end
 
         local AreModifiersHeld = function(Required)
@@ -2168,18 +2206,18 @@ do
             ModeButtons[Mode] = ModeButton
         end
 
-        function KeyPicker:Display()
+        function KeyPicker:Display(PickerText)
             if Library.Unloaded then
                 return
             end
 
             local X, Y = Library:GetTextBounds(
-                KeyPicker.DisplayValue,
+                PickerText or KeyPicker.DisplayValue,
                 Picker.FontFace,
                 Picker.TextSize,
                 ToggleLabel.AbsoluteSize.X
             )
-            Picker.Text = KeyPicker.DisplayValue
+            Picker.Text = PickerText or KeyPicker.DisplayValue
             Picker.Size = UDim2.fromOffset(X + 9 * Library.DPIScale, Y + 4 * Library.DPIScale)
         end
 
@@ -2324,23 +2362,90 @@ do
 
             -- Wait for an non modifier key --
             local Input
-            repeat
+            local ActiveModifiers = {}
+
+            local GetInput = function()
                 Input = UserInputService.InputBegan:Wait()
                 if UserInputService:GetFocusedTextBox() then
+                    return true
+                end
+            end
+
+            repeat
+                task.wait()
+
+                -- Wait for any input --
+                Picker.Text = "..."
+                Picker.Size = UDim2.fromOffset(29 * Library.DPIScale, 18 * Library.DPIScale)
+
+                if GetInput() then
                     Picking = false
                     KeyPicker:Update()
                     return
                 end
-            until not IsModifierInput(Input)
+
+                -- Escape --
+                if Input.KeyCode == Enum.KeyCode.Escape then
+                    break
+                end
+
+                -- Handle modifier keys --
+                if IsModifierInput(Input) then
+                    local StopLoop = false
+
+                    repeat
+                        task.wait()
+                        if UserInputService:IsKeyDown(Input.KeyCode) then
+                            task.wait(0.075)
+
+                            if UserInputService:IsKeyDown(Input.KeyCode) then
+                                -- Add modifier to the key list --
+                                if not table.find(ActiveModifiers, ModifiersInput[Input.KeyCode]) then
+                                    ActiveModifiers[#ActiveModifiers + 1] = ModifiersInput[Input.KeyCode]
+                                    KeyPicker:Display(table.concat(ActiveModifiers, " + ") .. " + ...")
+                                end
+
+                                -- Wait for another input --
+                                if GetInput() then
+                                    StopLoop = true
+                                    break -- Invalid Input
+                                end
+
+                                -- Escape --
+                                if Input.KeyCode == Enum.KeyCode.Escape then
+                                    break
+                                end
+
+                                -- Stop loop if its a normal key --
+                                if not IsModifierInput(Input) then
+                                    break
+                                end
+                            else
+                                if not table.find(ActiveModifiers, ModifiersInput[Input.KeyCode]) then
+                                    break -- Modifier is meant to be used as a normal key --
+                                end
+                            end
+                        end
+                    until false
+
+                    if StopLoop then
+                        Picking = false
+                        KeyPicker:Update()
+                        return
+                    end
+                end
+
+                break -- Input found, end loop
+            until false
 
             local Key = "Unknown"
-            local ActiveModifiers = if Input.KeyCode == Enum.KeyCode.Escape then {} else GetActiveModifiers()
-
             if SpecialKeysInput[Input.UserInputType] ~= nil then
-                Key = SpecialKeysInput[Input.UserInputType]
+                Key = SpecialKeysInput[Input.UserInputType];
             elseif Input.UserInputType == Enum.UserInputType.Keyboard then
-                Key = Input.KeyCode == Enum.KeyCode.Escape and "None" or Input.KeyCode.Name
+                Key = Input.KeyCode == Enum.KeyCode.Escape and "None" or Input.KeyCode.Name;
             end
+
+            ActiveModifiers = if Input.KeyCode == Enum.KeyCode.Escape or Key == "Unknown" then {} else ActiveModifiers;
 
             KeyPicker.Toggled = false
             KeyPicker:SetValue({ Key, KeyPicker.Mode, ActiveModifiers })
@@ -2412,6 +2517,9 @@ do
             table.insert(ParentObj.Addons, KeyPicker)
         end
 
+        KeyPicker.Default = KeyPicker.Value
+        KeyPicker.DefaultModifiers = table.clone(KeyPicker.Modifiers or {})
+
         Options[Idx] = KeyPicker
 
         return self
@@ -2429,6 +2537,7 @@ do
 
         local ColorPicker = {
             Value = Info.Default,
+
             Transparency = Info.Transparency or 0,
             Title = Info.Title,
 
@@ -2705,8 +2814,12 @@ do
         end
 
         function ColorPicker:SetValue(HSV, Transparency)
-            local Color = Color3.fromHSV(HSV[1], HSV[2], HSV[3])
+            if typeof(HSV) == "Color3" then
+                ColorPicker:SetValueRGB(HSV, Transparency)
+                return
+            end
 
+            local Color = Color3.fromHSV(HSV[1], HSV[2], HSV[3])
             ColorPicker.Transparency = Info.Transparency and Transparency or 0
             ColorPicker:SetHSVFromRGB(Color)
             ColorPicker:Update()
@@ -2808,6 +2921,8 @@ do
         if ParentObj.Addons then
             table.insert(ParentObj.Addons, ColorPicker)
         end
+
+        ColorPicker.Default = ColorPicker.Value
 
         Options[Idx] = ColorPicker
 
@@ -3083,7 +3198,7 @@ do
                 if Button.DoubleClick then
                     Button.Locked = true
 
-                    Button.Base.Text = "Are you sure?"
+                    Button.Base.Text = "你确定吗？"
                     Button.Base.TextColor3 = Library.Scheme.AccentColor
                     Library.Registry[Button.Base].TextColor3 = "AccentColor"
 
@@ -3130,131 +3245,4 @@ do
             }
 
             Button.SubButton = SubButton
-            SubButton.Base, SubButton.Stroke = CreateButton(SubButton)
-            InitEvents(SubButton)
-
-            function SubButton:UpdateColors()
-                if Library.Unloaded then
-                    return
-                end
-
-                StopTween(SubButton.Tween)
-
-                SubButton.Base.BackgroundColor3 = SubButton.Disabled and Library.Scheme.BackgroundColor
-                    or Library.Scheme.MainColor
-                SubButton.Base.TextTransparency = SubButton.Disabled and 0.8 or 0.4
-                SubButton.Stroke.Transparency = SubButton.Disabled and 0.5 or 0
-
-                Library.Registry[SubButton.Base].BackgroundColor3 = SubButton.Disabled and "BackgroundColor"
-                    or "MainColor"
-            end
-
-            function SubButton:SetDisabled(Disabled: boolean)
-                SubButton.Disabled = Disabled
-
-                if SubButton.TooltipTable then
-                    SubButton.TooltipTable.Disabled = SubButton.Disabled
-                end
-
-                SubButton.Base.Active = not SubButton.Disabled
-                SubButton:UpdateColors()
-            end
-
-            function SubButton:SetVisible(Visible: boolean)
-                SubButton.Visible = Visible
-
-                SubButton.Base.Visible = SubButton.Visible
-                Groupbox:Resize()
-            end
-
-            function SubButton:SetText(Text: string)
-                SubButton.Text = Text
-                SubButton.Base.Text = Text
-            end
-
-            if typeof(SubButton.Tooltip) == "string" or typeof(SubButton.DisabledTooltip) == "string" then
-                SubButton.TooltipTable =
-                    Library:AddTooltip(SubButton.Tooltip, SubButton.DisabledTooltip, SubButton.Base)
-                SubButton.TooltipTable.Disabled = SubButton.Disabled
-            end
-
-            if SubButton.Risky then
-                SubButton.Base.TextColor3 = Library.Scheme.Red
-                Library.Registry[SubButton.Base].TextColor3 = "Red"
-            end
-
-            SubButton:UpdateColors()
-
-            if Info.Idx then
-                Buttons[Info.Idx] = SubButton
-            else
-                table.insert(Buttons, SubButton)
-            end
-
-            return SubButton
-        end
-
-        function Button:UpdateColors()
-            if Library.Unloaded then
-                return
-            end
-
-            StopTween(Button.Tween)
-
-            Button.Base.BackgroundColor3 = Button.Disabled and Library.Scheme.BackgroundColor
-                or Library.Scheme.MainColor
-            Button.Base.TextTransparency = Button.Disabled and 0.8 or 0.4
-            Button.Stroke.Transparency = Button.Disabled and 0.5 or 0
-
-            Library.Registry[Button.Base].BackgroundColor3 = Button.Disabled and "BackgroundColor" or "MainColor"
-        end
-
-        function Button:SetDisabled(Disabled: boolean)
-            Button.Disabled = Disabled
-
-            if Button.TooltipTable then
-                Button.TooltipTable.Disabled = Button.Disabled
-            end
-
-            Button.Base.Active = not Button.Disabled
-            Button:UpdateColors()
-        end
-
-        function Button:SetVisible(Visible: boolean)
-            Button.Visible = Visible
-
-            Holder.Visible = Button.Visible
-            Groupbox:Resize()
-        end
-
-        function Button:SetText(Text: string)
-            Button.Text = Text
-            Button.Base.Text = Text
-        end
-
-        if typeof(Button.Tooltip) == "string" or typeof(Button.DisabledTooltip) == "string" then
-            Button.TooltipTable = Library:AddTooltip(Button.Tooltip, Button.DisabledTooltip, Button.Base)
-            Button.TooltipTable.Disabled = Button.Disabled
-        end
-
-        if Button.Risky then
-            Button.Base.TextColor3 = Library.Scheme.Red
-            Library.Registry[Button.Base].TextColor3 = "Red"
-        end
-
-        Button:UpdateColors()
-        Groupbox:Resize()
-
-        Button.Holder = Holder
-        table.insert(Groupbox.Elements, Button)
-
-        if Info.Idx then
-            Buttons[Info.Idx] = Button
-        else
-            table.insert(Buttons, Button)
-        end
-
-        return Button
-    end
-
-    function Funcs:AddCheckbox(I…
+            SubButton.Base, SubButton.Stroke = CreateB…
