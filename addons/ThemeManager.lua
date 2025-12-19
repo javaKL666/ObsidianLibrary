@@ -459,7 +459,7 @@ do
             end
         end)
         groupbox:AddButton("重置默认值", function()
-            local success = pcall(delfile, self.Folder .. "/主题/默认.txt")
+            local success = pcall(delfile, self.Folder .. "/Theme/Default.txt")
             if not success then
                 self.Library:Notify("Failed to reset default: delete file error")
                 return
