@@ -3083,7 +3083,7 @@ do
 				if Button.DoubleClick then
 					Button.Locked = true
 
-					Button.Base.Text = "Are you sure?"
+					Button.Base.Text = "您确定吗？"
 					Button.Base.TextColor3 = Library.Scheme.AccentColor
 					Library.Registry[Button.Base].TextColor3 = "AccentColor"
 
@@ -6061,7 +6061,7 @@ function Library:CreateWindow(WindowInfo)
             BackgroundTransparency = 1,
             Size = UDim2.new(0, 80, 0, 12),
             Position = UDim2.fromOffset(50, 14),
-            Text = "User用户",
+            Text = "Username用户",
             TextSize = 10,
             TextColor3 = Color3.fromRGB(200, 200, 200),
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -7098,7 +7098,7 @@ function Library:CreateWindow(WindowInfo)
 	end
 
 	if Library.IsMobile then
-		local ToggleButton = Library:AddDraggableButton("隐藏/显示", function()
+		local ToggleButton = Library:AddDraggableButton("开关界面", function()
 			Library:Toggle()
 		end)
 
